@@ -1,0 +1,6 @@
+<launch>
+  <node name="imu_listener" pkg="imu_listener" type="imu_listener" output="screen"/>
+  <node pkg="robot_localization" type="ekf_localization_node" name="ekf_se" clear_params="true">
+    <rosparam command="load" file="$(find imu_listener)/params/ekf_parameters.yaml" />
+  </node>
+</launch>
