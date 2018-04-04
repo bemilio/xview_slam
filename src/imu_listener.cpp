@@ -1,3 +1,5 @@
+#include "imu_listener/imu_listener.hpp"
+
 #include "ros/ros.h"
 #include "std_msgs/String.h"
 #include "tf/transform_listener.h"
@@ -9,76 +11,54 @@
 #include "geometry_msgs/Pose.h"
 #include "nav_msgs/Odometry.h"
 
-void callback(const std_msgs::String::ConstPtr& msg)
-{
-	ROS_INFO("Qualcuno ha detto [%s] ?!", msg->data.c_str());
-};
 
+//GTSAM headers
+//#include <gtsam/slam/expressions.h>
+//#include <gtsam/nonlinear/ExpressionFactorGraph.h>
+#include <gtsam/geometry/Pose2.h>
+//#include <gtsam/nonlinear/Values.h>
+//#include <gtsam/inference/Symbol.h>
+//#include <gtsam/nonlinear/GaussNewtonOptimizer.h>
+//#include <gtsam/nonlinear/Marginals.h>
+//#include <gtsam/geometry/Pose3.h>
 
-class ImuComposer
-{
-private:
-	geometry_msgs::Quaternion imu_composed ();
-	
-public:
-    void callback_imu(const sensor_msgs::Imu::ConstPtr& imu_msg){
-	ROS_INFO("Orientation:");
-	ROS_INFO_STREAM(imu_msg->orientation);
-	
-	//for(int i=0;i<9;i++){
-	//	ROS_INFO_STREAM(imu_msg->orientation_covariance[i]);
-
-    	//WARNING: if this function does not return void I get error
-    	//when using it as a callback
-    	//return(imu_msg->orientation);
-
-	}
-};
+using namespace std;
+using namespace gtsam;
 
 
 
-
-
-// void callback_joints(const sensor_msgs::JointState::ConstPtr& joints_msg){
-	
-// };
-
-// void callback_odom(const nav_msgs::Odometry::ConstPtr& odom_msg){
-// 	//geometry_msgs::PoseWithCovariance odom_with_cov_msg = odom_msg->pose;
-// 	//geometry_msgs::Pose odom_pose_msg = odom_with_cov_msg.pose;
-// 	//geometry_msgs::Point odom_posit_msg = odom_pose_msg.position;
-// 	// geometry_msgs::Quaternion odom_orientation_msg = odom_pose_msg.orientation;
-// 	// tf::Quaternion odom_orientation  = tf::Quaternion(odom_orientation_msg.x, odom_orientation_msg.y, odom_orientation_msg.z, odom_orientation_msg.w);
-// };
-
-// void callback_localization(const nav_msgs::Odometry::ConstPtr& odom_msg){
-// 	geometry_msgs::PoseWithCovariance::ConstPtr& odom_with_cov_msg = odom_msg->pose;
-// 	geometry_msgs::Pose::ConstPtr& odom_pose_msg = odom_with_cov_msg->pose;
-// 	geometry_msgs::Point::ConstPtr& odom_posit_msg = odom_pose_msg->position;
-// 	geometry_msgs::Quaternion::ConstPtr& odom_orientation_msg = odom_pose_msg->orientation;
-// 	tf::Quaternion odom_orientation  = tf::Quaternion(odom_orientation_msg->x,
-// 					odom_orientation_msg->y, odom_orientation_msg->z, odom_orientation_msg->w);
-// 	ROS_INFO("robot_localization output:");
-// 	ROS_INFO_STREAM(odom_orientation);
-// };
-
-class OdometryFactorsHandler{
+class OdometryFactorsHandler {
 private:
 	tf::StampedTransform current_transform;
+	ExpressionFactorGraph::shared_ptr& graph;
+	int odometry_counter = 0;
+	noiseModel::Diagonal::shared_ptr odomModel = noiseModel::Diagonal::Sigmas((Vector(6) << 1e-6, 1e-6, 1e-6, 1e-4, 1e-4, 1e-4));
 public:
-	OdometryFactorsHandler();
+	OdometryFactorsHandler(ExpressionFactorGraph::shared_ptr&);
 	void createOdomFactor(tf::Transform&);
 	tf::Transform getRelativeTransormation(tf::StampedTransform&, tf::StampedTransform&);
 	void handleTransform(tf::StampedTransform&);
 };
 
-OdometryFactorsHandler::OdometryFactorsHandler(){
-	//declare constructor here
+OdometryFactorsHandler::OdometryFactorsHandler(ExpressionFactorGraph::shared_ptr& input_graph){
 	current_transform.setIdentity();
+	graph =  input_graph;
 };
 
 void OdometryFactorsHandler::createOdomFactor(tf::Transform& relative_odom_transform){
-	;
+	Vector3 t = relative_odom_transform.getOrigin();
+	Quaternion orientation = relative_odom_transform.getRotation();
+	tf::Matrix3x3 R = tf::Matrix3x3(orientation);
+	Pose3_ relative_pose_ = Pose3_(R, t); //expression because of underscore at the end (?)
+	if(odometry_counter==0){
+
+	}
+	else{
+		Expression<Pose3> x1_(Symbol('x', odometry_counter));
+		Expression<Pose3> x2_(Symbol('x', odometry_counter+1));
+		graph.addExpressionFactor(between(x1_, x2_), relative_pose_, odomModel);
+		odometry_counter++;
+	}
 };
 
 tf::Transform OdometryFactorsHandler::getRelativeTransormation(tf::StampedTransform& T_w_a,
@@ -91,19 +71,17 @@ tf::Transform OdometryFactorsHandler::getRelativeTransormation(tf::StampedTransf
 void OdometryFactorsHandler::handleTransform(tf::StampedTransform& transform){
 	tf::Transform relative_odom_transform = OdometryFactorsHandler::getRelativeTransormation(current_transform, transform);
 	OdometryFactorsHandler::createOdomFactor(relative_odom_transform);
+
 }
-
-
 
 
 int main(int argc, char **argv){
 	ros::init(argc, argv, "imu_listener");
-	ImuComposer imuComposer;
+	ExpressionFactorGraph graph;
 	ros::NodeHandle node;
-	ros::Subscriber sub = node.subscribe("random_topic", 1000, callback);
 	ROS_INFO("Initialized!");
 	tf::TransformListener listener;
-	OdometryFactorsHandler odom_handler;
+	OdometryFactorsHandler odom_handler(graph);
 	ros::Rate rate(10.0);
     while (node.ok()){
   		tf::StampedTransform transform;
@@ -120,10 +98,6 @@ int main(int argc, char **argv){
 	    	odom_handler.handleTransform(transform);
 	    }
 	}
-	//ros::Subscriber imu_sub = node.subscribe("/imu/data", 1000, &ImuComposer::callback_imu, &imuComposer);
-	//ros::Subscriber odometry_sub = node.subscribe("/husky_velocity_controller/odom ", 1000, callback_odom);
-	//ros::Subscriber imu_sub = node.subscribe("/joint_states", 1000, callback_joints);
-	ROS_INFO("tf listener started");;
 	ros::spin();
 	return 0;
 }
