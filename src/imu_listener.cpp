@@ -13,50 +13,57 @@
 
 
 //GTSAM headers
-//#include <gtsam/slam/expressions.h>
-//#include <gtsam/nonlinear/ExpressionFactorGraph.h>
+#include <gtsam/slam/expressions.h>
+#include <gtsam/nonlinear/ExpressionFactorGraph.h>
 #include <gtsam/geometry/Pose2.h>
-//#include <gtsam/nonlinear/Values.h>
-//#include <gtsam/inference/Symbol.h>
-//#include <gtsam/nonlinear/GaussNewtonOptimizer.h>
-//#include <gtsam/nonlinear/Marginals.h>
-//#include <gtsam/geometry/Pose3.h>
+#include <gtsam/nonlinear/Values.h>
+#include <gtsam/inference/Symbol.h>
+#include <gtsam/nonlinear/GaussNewtonOptimizer.h>
+#include <gtsam/nonlinear/Marginals.h>
+#include <gtsam/geometry/Pose3.h>
 
 using namespace std;
-using namespace gtsam;
 
 
 
 class OdometryFactorsHandler {
 private:
 	tf::StampedTransform current_transform;
-	ExpressionFactorGraph::shared_ptr& graph;
-	int odometry_counter = 0;
-	noiseModel::Diagonal::shared_ptr odomModel = noiseModel::Diagonal::Sigmas((Vector(6) << 1e-6, 1e-6, 1e-6, 1e-4, 1e-4, 1e-4));
+	gtsam::ExpressionFactorGraph::shared_ptr& graph;
+	int odometry_counter;
+	gtsam::noiseModel::Diagonal::shared_ptr noise_model;
 public:
-	OdometryFactorsHandler(ExpressionFactorGraph::shared_ptr&);
+	OdometryFactorsHandler(gtsam::ExpressionFactorGraph::shared_ptr&);
 	void createOdomFactor(tf::Transform&);
 	tf::Transform getRelativeTransormation(tf::StampedTransform&, tf::StampedTransform&);
 	void handleTransform(tf::StampedTransform&);
 };
 
-OdometryFactorsHandler::OdometryFactorsHandler(ExpressionFactorGraph::shared_ptr& input_graph){
-	current_transform.setIdentity();
-	graph =  input_graph;
+OdometryFactorsHandler::OdometryFactorsHandler(gtsam::ExpressionFactorGraph::shared_ptr& input_graph)
+		: graph(input_graph), odometry_counter(0)
+{
+	Eigen::Matrix<double,6,1> noise;
+	noise(0) = 0.0000001;
+	noise(1) = 0.0000001;
+	noise(2) = 0.0000001;
+	noise(3) = 0.0000001;
+	noise(4) = 0.0000001;
+	noise(5) = 0.0000001;
+	noise_model = gtsam::noiseModel::Diagonal::Sigmas(noise);
 };
 
 void OdometryFactorsHandler::createOdomFactor(tf::Transform& relative_odom_transform){
-	Vector3 t = relative_odom_transform.getOrigin();
-	Quaternion orientation = relative_odom_transform.getRotation();
+	tf::Vector3 t = relative_odom_transform.getOrigin();
+	tf::Quaternion orientation = relative_odom_transform.getRotation();
 	tf::Matrix3x3 R = tf::Matrix3x3(orientation);
-	Pose3_ relative_pose_ = Pose3_(R, t); //expression because of underscore at the end (?)
+	gtsam::Pose3_ relative_pose_ = gtsam::Pose3_(R, t); //expression because of underscore at the end (?)
 	if(odometry_counter==0){
 
 	}
 	else{
-		Expression<Pose3> x1_(Symbol('x', odometry_counter));
-		Expression<Pose3> x2_(Symbol('x', odometry_counter+1));
-		graph.addExpressionFactor(between(x1_, x2_), relative_pose_, odomModel);
+		gtsam::Expression<gtsam::Pose3> x1_(gtsam::Symbol('x', odometry_counter));
+		gtsam::Expression<gtsam::Pose3> x2_(gtsam::Symbol('x', odometry_counter+1));
+		graph.addExpressionFactor(gtsam::between(x1_, x2_), relative_pose_, noise_model);
 		odometry_counter++;
 	}
 };
@@ -71,13 +78,12 @@ tf::Transform OdometryFactorsHandler::getRelativeTransormation(tf::StampedTransf
 void OdometryFactorsHandler::handleTransform(tf::StampedTransform& transform){
 	tf::Transform relative_odom_transform = OdometryFactorsHandler::getRelativeTransormation(current_transform, transform);
 	OdometryFactorsHandler::createOdomFactor(relative_odom_transform);
-
 }
 
 
 int main(int argc, char **argv){
 	ros::init(argc, argv, "imu_listener");
-	ExpressionFactorGraph graph;
+	gtsam::ExpressionFactorGraph graph;
 	ros::NodeHandle node;
 	ROS_INFO("Initialized!");
 	tf::TransformListener listener;
